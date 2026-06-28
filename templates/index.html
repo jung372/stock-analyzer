@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>가치투자 포렌식 분석 엔진</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📊 가치투자 포렌식 분석 엔진</h1>
+      <p class="subtitle">종목 정보를 입력하면 재무 데이터 수집 → AI 보고서를 자동으로 생성합니다</p>
+    </header>
+
+    {% if error %}
+    <div class="error-box">⚠️ {{ error }}</div>
+    {% endif %}
+
+    <div class="card">
+      <form id="analyzeForm" action="/analyze" method="POST">
+        <div class="form-group">
+          <label for="company_name">기업명</label>
+          <input type="text" id="company_name" name="company_name"
+                 placeholder="예: 삼성전자" required>
+        </div>
+        <div class="form-group">
+          <label for="stock_code">종목코드</label>
+          <input type="text" id="stock_code" name="stock_code"
+                 placeholder="예: 005930" maxlength="6" required>
+        </div>
+        <div class="form-group">
+          <label for="corp_code">DART 고유번호</label>
+          <input type="text" id="corp_code" name="corp_code"
+                 placeholder="예: 00126380" maxlength="8" required>
+          <small>DART 전자공시 → 기업 검색 → 고유번호 8자리</small>
+        </div>
+        <button type="submit" id="submitBtn">분석 시작</button>
+      </form>
+    </div>
+
+    <div class="examples">
+      <p>빠른 입력 예시</p>
+      <button class="example-btn" onclick="fillForm('삼성전자','005930','00126380')">삼성전자</button>
+      <button class="example-btn" onclick="fillForm('SK하이닉스','000660','00164779')">SK하이닉스</button>
+      <button class="example-btn" onclick="fillForm('NAVER','035420','00266961')">NAVER</button>
+      <button class="example-btn" onclick="fillForm('카카오','035720','00918444')">카카오</button>
+    </div>
+  </div>
+
+  <!-- 로딩 오버레이 -->
+  <div id="loading" class="loading-overlay" style="display:none;">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <p class="loading-title">분석 진행 중...</p>
+      <p class="loading-sub" id="loadingStep">재무 데이터 수집 중 (약 1~2분 소요)</p>
+    </div>
+  </div>
+
+  <script>
+    function fillForm(name, code, dart) {
+      document.getElementById('company_name').value = name;
+      document.getElementById('stock_code').value   = code;
+      document.getElementById('corp_code').value    = dart;
+    }
+
+    const steps = [
+      '네이버 금융 데이터 수집 중...',
+      '10년 주가 히스토리 수집 중...',
+      'DART 연간 재무제표 수집 중...',
+      'DART 분기 재무제표 수집 중...',
+      '재무 지표 계산 중...',
+      'Claude AI 보고서 생성 중...',
+    ];
+
+    document.getElementById('analyzeForm').addEventListener('submit', function() {
+      document.getElementById('loading').style.display = 'flex';
+      document.getElementById('submitBtn').disabled = true;
+      let i = 0;
+      setInterval(() => {
+        if (i < steps.length) {
+          document.getElementById('loadingStep').textContent = steps[i++];
+        }
+      }, 15000);
+    });
+  </script>
+</body>
+</html>

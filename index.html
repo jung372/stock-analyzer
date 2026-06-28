@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>가치투자 포렌식 분석 엔진</title>
+  <link rel="stylesheet" href="static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    /* ── 검색 바 ── */
+    .search-bar {
+      background: #0f172a;
+      padding: 1.6rem 1.5rem 1.8rem;
+      text-align: center;
+    }
+    .search-bar h1 {
+      color: #f1f5f9;
+      font-size: 1.35rem;
+      margin-bottom: 0.4rem;
+    }
+    .search-bar .subtitle { color: #64748b; font-size: 0.84rem; margin-bottom: 1.1rem; }
+    .search-wrap {
+      position: relative;
+      display: inline-block;
+      width: 100%;
+      max-width: 560px;
+    }
+    .search-wrap input {
+      width: 100%;
+      padding: 0.82rem 1.1rem 0.82rem 2.7rem;
+      font-size: 1rem;
+      font-family: inherit;
+      border: none;
+      border-radius: 8px;
+      outline: none;
+      box-shadow: 0 2px 14px rgba(0,0,0,0.45);
+      transition: box-shadow 0.2s;
+    }
+    .search-wrap input:focus { box-shadow: 0 0 0 3px rgba(59,130,246,0.5), 0 2px 14px rgba(0,0,0,0.45); }
+    .search-wrap input:disabled { background: #e2e8f0; color: #94a3b8; cursor: not-allowed; }
+    .search-icon {
+      position: absolute; left: 0.82rem; top: 50%;
+      transform: translateY(-50%); pointer-events: none; font-size: 1rem;
+    }
+
+    /* ── 자동완성 드롭다운 ── */
+    .dropdown {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px); left: 0; right: 0;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+      z-index: 300;
+      overflow: hidden;
+      max-height: 280px;
+      overflow-y: auto;
+      text-align: left;
+    }
+    .dd-item {
+      padding: 0.68rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      border-bottom: 1px solid #f1f5f9;
+      transition: background 0.1s;
+    }
+    .dd-item:last-child { border-bottom: none; }
+    .dd-item:hover, .dd-item.on { background: #eff6ff; }
+    .dd-name { font-weight: 600; color: #1e293b; font-size: 0.94rem; }
+    .dd-code { color: #64748b; font-size: 0.82rem; font-family: monospace; }
+    .dd-msg  { padding: 0.9rem 1rem; color: #94a3b8; font-size: 0.88rem; text-align: center; }
+
+    /* ── 보고서 섹션 플레이스홀더 ── */
+    .ph {
+      padding: 3rem 1rem;
+      text-align: center;
+      color: #94a3b8;
+      border: 2px dashed #e2e8f0;
+      border-radius: 8px;
+    }
+    .ph p { margin: 0.3rem 0; font-size: 0.9rem; }
+    .ph p:first-child { font-size: 1rem; color: #64748b; margin-bottom: 0.6rem; }
+
+    /* ── 섹션 내부 로딩 ── */
+    .sec-loading {
+      padding: 3.5rem 1rem;
+      text-align: center;
+      color: #64748b;
+    }
+    .sec-loading .spinner { margin: 0 auto 1rem; }
+    .sec-loading p { font-size: 0.92rem; margin: 0.25rem 0; }
+    .sec-loading .step-msg { color: #94a3b8; font-size: 0.82rem; margin-top: 0.4rem; }
+
+    /* ── 헤더 플레이스홀더 텍스트 ── */
+    .ph-title { color: #64748b; font-weight: 400; font-size: 1rem; }
+  </style>
+</head>
+<body>
+
+  <!-- ══ 검색 바 ══ -->
+  <div class="search-bar">
+    <h1>📊 가치투자 포렌식 분석 엔진</h1>
+    <p class="subtitle">종목명 또는 종목코드를 입력하면 재무 데이터 수집 후 AI 보고서가 자동으로 채워집니다</p>
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input id="searchInput" type="text" autocomplete="off"
+             placeholder="종목명 또는 종목코드 입력 (예: 삼성전자, 005930)">
+      <div id="dropdown" class="dropdown"></div>
+    </div>
+  </div>
+
+  <!-- ══ 로딩 오버레이 ══ -->
+  <div id="loading" class="loading-overlay" style="display:none;">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <p class="loading-title" id="loadingTitle">분석 준비 중...</p>
+      <p class="loading-sub"   id="loadingStep">잠시만 기다려 주세요</p>
+    </div>
+  </div>
+
+  <!-- ══ 보고서 컨테이너 (항상 표시) ══ -->
+  <div class="container report-container">
+
+    <!-- 헤더 -->
+    <header class="report-header">
+      <div class="report-title-row">
+        <h1 id="reportTitle"><span class="ph-title">← 위 검색창에서 종목을 선택하세요</span></h1>
+        <div class="header-actions" id="headerBtns" style="visibility:hidden;">
+          <button onclick="window.print()" class="btn-print">🖨️ 인쇄 / PDF</button>
+        </div>
+      </div>
+      <div class="kpi-bar">
+        <div class="kpi"><span class="kpi-label">현재 주가</span><span class="kpi-value" id="kpiPrice">-</span></div>
+        <div class="kpi"><span class="kpi-label">시가총액</span><span class="kpi-value" id="kpiMcap">-</span></div>
+        <div class="kpi"><span class="kpi-label">발행주식수</span><span class="kpi-value" id="kpiShares">-</span></div>
+        <div class="kpi"><span class="kpi-label">RIM 내재가치</span><span class="kpi-value" id="kpiRim">-</span></div>
+      </div>
+    </header>
+
+    <!-- 에러 배너 -->
+    <div id="errBanner" class="error-box" style="display:none;"></div>
+
+    <!-- 차트 섹션 -->
+    <section class="card chart-section">
+      <h2>재무 분석 차트</h2>
+      <div id="chartsWrap">
+        <div class="ph">
+          <p>종목을 선택하면 차트가 표시됩니다.</p>
+          <p>10년 주가 추이 · 수익성 트렌드 (OPM / ROE) · 자본구조 (부채비율)</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- AI 보고서 섹션 -->
+    <section class="card report-section">
+      <h2>AI 투자 분석 보고서</h2>
+      <div id="reportWrap" class="report-body">
+        <div class="ph">
+          <p>종목을 선택하면 AI가 생성한 투자 분석 보고서가 표시됩니다.</p>
+          <p>사업현황 · 경쟁사 비교 · 경쟁우위요소 · 투자 아이디어 · 기업가치 평가 · 리스크 · 최종 투자의견</p>
+        </div>
+      </div>
+    </section>
+
+  </div><!-- /container -->
+
+  <script>
+    const BASE = 'http://localhost:5000';
+    const STEPS = [
+      '네이버 금융 데이터 수집 중...',
+      '10년 주가 히스토리 수집 중...',
+      'DART 연간 재무제표 수집 중...',
+      'DART 분기 재무제표 수집 중...',
+      '재무 지표 계산 중...',
+      'Claude AI 보고서 생성 중...',
+    ];
+
+    /* ── 자동완성 ── */
+    const searchInput = document.getElementById('searchInput');
+    const dropdown    = document.getElementById('dropdown');
+    let _items = [], _active = -1, _debounce = null, _reqId = 0, _stepTimer = null;
+
+    searchInput.addEventListener('input', () => {
+      clearTimeout(_debounce);
+      const q = searchInput.value.trim();
+      if (!q) { hideDrop(); return; }
+      _debounce = setTimeout(() => fetchStocks(q), 280);
+    });
+
+    searchInput.addEventListener('keydown', e => {
+      if (dropdown.style.display === 'none') return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(_active + 1, _items.length - 1)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(_active - 1, 0)); }
+      else if (e.key === 'Enter' && _active >= 0) { e.preventDefault(); pick(_active); }
+      else if (e.key === 'Escape') hideDrop();
+    });
+
+    document.addEventListener('click', e => {
+      if (!e.target.closest('.search-wrap')) hideDrop();
+    });
+
+    async function fetchStocks(q) {
+      dropdown.innerHTML = '<div class="dd-msg">검색 중...</div>';
+      dropdown.style.display = 'block';
+      try {
+        const res = await fetch(`${BASE}/stocks?q=${encodeURIComponent(q)}`);
+        _items = await res.json();
+        renderDrop();
+      } catch {
+        dropdown.innerHTML = '<div class="dd-msg">서버 연결 실패 — web_app.py를 먼저 실행하세요.</div>';
+      }
+    }
+
+    function renderDrop() {
+      _active = -1;
+      if (!_items.length) { dropdown.innerHTML = '<div class="dd-msg">검색 결과가 없습니다.</div>'; return; }
+      dropdown.innerHTML = _items.map((c, i) =>
+        `<div class="dd-item" data-i="${i}">
+           <span class="dd-name">${c.corp_name}</span>
+           <span class="dd-code">${c.stock_code}</span>
+         </div>`
+      ).join('');
+      dropdown.querySelectorAll('.dd-item').forEach(el =>
+        el.addEventListener('click', () => pick(+el.dataset.i))
+      );
+    }
+
+    function setActive(i) {
+      _active = i;
+      dropdown.querySelectorAll('.dd-item').forEach((el, idx) => el.classList.toggle('on', idx === i));
+      const el = dropdown.querySelector('.dd-item.on');
+      if (el) el.scrollIntoView({ block: 'nearest' });
+    }
+
+    function hideDrop() { dropdown.style.display = 'none'; _items = []; _active = -1; }
+
+    function pick(i) {
+      const stock = _items[i];
+      hideDrop();
+      searchInput.value = `${stock.corp_name}  ${stock.stock_code}`;
+      analyze(stock);
+    }
+
+    /* ── 분석 실행 ── */
+    async function analyze(stock) {
+      const myId = ++_reqId;
+
+      // 헤더 즉시 업데이트
+      document.getElementById('reportTitle').innerHTML =
+        `${stock.corp_name} <span class="stock-code">${stock.stock_code}</span>`;
+      document.getElementById('headerBtns').style.visibility = 'visible';
+      ['kpiPrice','kpiMcap','kpiShares','kpiRim'].forEach(id =>
+        document.getElementById(id).textContent = '-'
+      );
+      document.getElementById('errBanner').style.display = 'none';
+
+      // 섹션 내부 로딩 표시
+      setChartsLoading();
+      setReportLoading();
+
+      // 전체 오버레이
+      showOverlay();
+
+      try {
+        const res = await fetch(`${BASE}/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            company_name: stock.corp_name,
+            stock_code:   stock.stock_code,
+            corp_code:    stock.corp_code,
+          }),
+        });
+        if (_reqId !== myId) return;
+
+        const data = await res.json();
+        if (_reqId !== myId) return;
+
+        if (data.error) { showErr(data.error); resetSections(); return; }
+        render(data);
+
+      } catch (e) {
+        if (_reqId !== myId) return;
+        showErr('서버 연결 실패: ' + e.message);
+        resetSections();
+      } finally {
+        if (_reqId === myId) hideOverlay();
+      }
+    }
+
+    /* ── 결과 렌더링 ── */
+    function render(data) {
+      document.getElementById('kpiPrice').textContent =
+        data.current_price > 0 ? data.current_price.toLocaleString('ko-KR') + ' 원' : '-';
+      document.getElementById('kpiMcap').textContent =
+        data.market_cap > 0 ? (data.market_cap / 1e12).toFixed(1) + '조 원' : '-';
+      document.getElementById('kpiShares').textContent =
+        data.shares_out > 0 ? data.shares_out.toLocaleString('ko-KR') + ' 주' : '-';
+      document.getElementById('kpiRim').textContent = data.rim_str || '-';
+
+      // 차트: blob → iframe
+      const blob   = new Blob([data.charts_html], { type: 'text/html' });
+      const url    = URL.createObjectURL(blob);
+      const iframe = Object.assign(document.createElement('iframe'), {
+        src: url,
+        onload: () => URL.revokeObjectURL(url),
+      });
+      iframe.style.cssText = 'width:100%;height:950px;border:none;';
+      const cw = document.getElementById('chartsWrap');
+      cw.innerHTML = '';
+      cw.appendChild(iframe);
+
+      document.getElementById('reportWrap').innerHTML = marked.parse(data.report_md);
+      window.scrollTo(0, 0);
+    }
+
+    /* ── 헬퍼 ── */
+    function setChartsLoading() {
+      document.getElementById('chartsWrap').innerHTML =
+        '<div class="sec-loading"><div class="spinner"></div><p>차트 생성 중...</p></div>';
+    }
+
+    function setReportLoading() {
+      document.getElementById('reportWrap').innerHTML =
+        '<div class="sec-loading"><div class="spinner"></div><p>AI 보고서 생성 중...</p><p class="step-msg" id="stepMsg">데이터 수집 준비 중</p></div>';
+    }
+
+    function resetSections() {
+      const msg = '<div class="ph"><p>분석 중 오류가 발생했습니다. 다시 검색해 주세요.</p></div>';
+      document.getElementById('chartsWrap').innerHTML  = msg;
+      document.getElementById('reportWrap').innerHTML  = msg;
+    }
+
+    function showErr(msg) {
+      const b = document.getElementById('errBanner');
+      b.textContent = '⚠️ ' + msg;
+      b.style.display = 'block';
+    }
+
+    function showOverlay() {
+      let step = 0;
+      document.getElementById('loadingTitle').textContent = '분석 진행 중...';
+      document.getElementById('loadingStep').textContent  = STEPS[0];
+      _stepTimer = setInterval(() => {
+        if (++step < STEPS.length) {
+          document.getElementById('loadingStep').textContent = STEPS[step];
+          const el = document.getElementById('stepMsg');
+          if (el) el.textContent = STEPS[step];
+        }
+      }, 15000);
+      document.getElementById('loading').style.display = 'flex';
+    }
+
+    function hideOverlay() {
+      clearInterval(_stepTimer);
+      document.getElementById('loading').style.display = 'none';
+    }
+
+    /* ── 서버 상태 확인 (시작 시) ── */
+    async function checkServer() {
+      try {
+        const res  = await fetch(`${BASE}/status`);
+        const data = await res.json();
+        if (!data.ready) {
+          searchInput.placeholder = '종목 목록 로딩 중... (잠시 후 자동으로 활성화됩니다)';
+          searchInput.disabled = true;
+          setTimeout(checkServer, 2000);
+        } else {
+          searchInput.placeholder = '종목명 또는 종목코드 입력 (예: 삼성전자, 005930)';
+          searchInput.disabled = false;
+          searchInput.focus();
+        }
+      } catch {
+        searchInput.placeholder = 'web_app.py를 먼저 실행하세요 (python web_app.py)';
+        setTimeout(checkServer, 3000);
+      }
+    }
+
+    window.addEventListener('load', checkServer);
+  </script>
+</body>
+</html>

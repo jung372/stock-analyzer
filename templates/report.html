@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ result.company_name }} 투자 분석 보고서</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+  <div class="container report-container">
+
+    <!-- 상단 헤더 -->
+    <header class="report-header">
+      <div class="report-title-row">
+        <h1>{{ result.company_name }} <span class="stock-code">{{ result.stock_code }}</span></h1>
+        <div class="header-actions">
+          <button onclick="window.print()" class="btn-print">🖨️ 인쇄 / PDF</button>
+          <a href="/" class="btn-back">← 새 분석</a>
+        </div>
+      </div>
+      <div class="kpi-bar">
+        <div class="kpi">
+          <span class="kpi-label">현재 주가</span>
+          <span class="kpi-value">{{ "{:,.0f}".format(result.current_price) }} 원</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">시가총액</span>
+          <span class="kpi-value">
+            {% if result.market_cap > 0 %}
+              {{ "{:.1f}".format(result.market_cap / 1e12) }}조 원
+            {% else %}
+              -
+            {% endif %}
+          </span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">발행주식수</span>
+          <span class="kpi-value">
+            {% if result.shares_out > 0 %}
+              {{ "{:,.0f}".format(result.shares_out) }} 주
+            {% else %}
+              -
+            {% endif %}
+          </span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">RIM 내재가치</span>
+          <span class="kpi-value">
+            {% set rim = result.metrics.get('rim_value') if result.metrics else None %}
+            {% if rim %}
+              {{ "{:.1f}".format(rim / 1e12) }}조 원
+            {% else %}
+              데이터 부족
+            {% endif %}
+          </span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 차트 섹션 -->
+    <section class="card chart-section">
+      <h2>재무 분석 차트</h2>
+      {{ charts_html | safe }}
+    </section>
+
+    <!-- AI 보고서 섹션 -->
+    <section class="card report-section">
+      <h2>AI 투자 분석 보고서</h2>
+      <div id="reportContent" class="report-body"></div>
+    </section>
+
+  </div>
+
+  <script>
+    // 마크다운 → HTML 렌더링
+    const raw = {{ report_md | tojson }};
+    document.getElementById('reportContent').innerHTML = marked.parse(raw);
+  </script>
+</body>
+</html>

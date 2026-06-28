@@ -1,0 +1,22 @@
+# 환경변수 / 비밀키
+.env
+
+# 캐시
+data/corps_cache.json
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# 생성 보고서
+output/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+Thumbs.db
+.DS_Store
