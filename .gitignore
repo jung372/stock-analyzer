@@ -3,6 +3,7 @@
 
 # 캐시
 data/corps_cache.json
+data/reports.db
 __pycache__/
 **/__pycache__/
 *.pyc
