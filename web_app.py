@@ -1,14 +1,20 @@
 import os
 import pathlib
+import sys
 import threading
 import webbrowser
+from datetime import datetime, timezone
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
+
+# Windows 콘솔 기본 인코딩(cp949)에서 이모지 등 print() 실패 방지
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 load_dotenv()
 
 from business.analyzer   import run_analysis
-from presentation.charts import generate_plotly_html
+from presentation.charts import generate_charts_html
 from llm.claude_client   import generate_report
 from data.stock_list     import load_corp_list, search_corps
 from data.report_cache   import init_db, get_cached_report, save_report
@@ -52,6 +58,19 @@ def stocks():
     return jsonify(search_corps(_corps, q))
 
 
+@app.route('/report/<stock_code>')
+def report_view(stock_code):
+    """차트 iframe용 실제 HTTP 경로.
+
+    Blob URL(origin이 없음) 대신 실제 origin(http://localhost:5000)으로 서빙해야
+    TradingView 위젯이 종목 심볼을 정상적으로 해석함.
+    """
+    cached = get_cached_report(stock_code)
+    if cached is None:
+        return Response('<p>리포트를 찾을 수 없습니다.</p>', mimetype='text/html'), 404
+    return Response(cached['charts_html'], mimetype='text/html')
+
+
 @app.route('/analyze', methods=['POST', 'OPTIONS'])
 def analyze():
     if request.method == 'OPTIONS':
@@ -69,12 +88,13 @@ def analyze():
     if not force_refresh:
         cached = get_cached_report(stock_code)
         if cached is not None:
-            print(f'[CACHE HIT] {stock_code} - 캐시된 리포트 반환')
+            print(f'[CACHE HIT] {stock_code} - 마지막으로 생성된 리포트 반환 (업데이트는 버튼으로 직접 요청)')
+            cached['from_cache'] = True
             return jsonify(cached)
 
     try:
         result      = run_analysis(company_name, stock_code, corp_code)
-        charts_html = generate_plotly_html(result, full_html=True)
+        charts_html = generate_charts_html(result)
         report_md   = generate_report(result)
 
         metrics   = result.get('metrics') or {}
@@ -92,6 +112,8 @@ def analyze():
             'report_md':     report_md,
         }
         save_report(stock_code, corp_code, payload)
+        payload['generated_at'] = datetime.now(timezone.utc).isoformat()
+        payload['from_cache']   = False
 
         try:
             backup_reports()

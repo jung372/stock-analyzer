@@ -95,6 +95,14 @@
 
     /* ── 헤더 플레이스홀더 텍스트 ── */
     .ph-title { color: #64748b; font-weight: 400; font-size: 1rem; }
+
+    /* ── 마지막 생성 시각 ── */
+    .generated-at {
+      color: #94a3b8;
+      font-size: 0.8rem;
+      margin: -0.6rem 0 1rem;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -128,9 +136,11 @@
       <div class="report-title-row">
         <h1 id="reportTitle"><span class="ph-title">← 위 검색창에서 종목을 선택하세요</span></h1>
         <div class="header-actions" id="headerBtns" style="visibility:hidden;">
+          <button onclick="updateReport()" id="updateBtn" class="btn-print">🔄 업데이트</button>
           <button onclick="window.print()" class="btn-print">🖨️ 인쇄 / PDF</button>
         </div>
       </div>
+      <div id="generatedAt" class="generated-at"></div>
       <div class="kpi-bar">
         <div class="kpi"><span class="kpi-label">현재 주가</span><span class="kpi-value" id="kpiPrice">-</span></div>
         <div class="kpi"><span class="kpi-label">시가총액</span><span class="kpi-value" id="kpiMcap">-</span></div>
@@ -148,7 +158,7 @@
       <div id="chartsWrap">
         <div class="ph">
           <p>종목을 선택하면 차트가 표시됩니다.</p>
-          <p>10년 주가 추이 · 수익성 트렌드 (OPM / ROE) · 자본구조 (부채비율)</p>
+          <p>10년 주가 추이 (캔들 · 거래량) · 수익성 트렌드 (OPM / ROE) · 자본구조 (부채비율)</p>
         </div>
       </div>
     </section>
@@ -181,6 +191,7 @@
     const searchInput = document.getElementById('searchInput');
     const dropdown    = document.getElementById('dropdown');
     let _items = [], _active = -1, _debounce = null, _reqId = 0, _stepTimer = null;
+    let currentStock = null;
 
     searchInput.addEventListener('input', () => {
       clearTimeout(_debounce);
@@ -244,17 +255,20 @@
     }
 
     /* ── 분석 실행 ── */
-    async function analyze(stock) {
+    async function analyze(stock, forceRefresh = false) {
       const myId = ++_reqId;
+      currentStock = stock;
 
       // 헤더 즉시 업데이트
       document.getElementById('reportTitle').innerHTML =
         `${stock.corp_name} <span class="stock-code">${stock.stock_code}</span>`;
       document.getElementById('headerBtns').style.visibility = 'visible';
+      document.getElementById('updateBtn').disabled = true;
       ['kpiPrice','kpiMcap','kpiShares','kpiRim'].forEach(id =>
         document.getElementById(id).textContent = '-'
       );
       document.getElementById('errBanner').style.display = 'none';
+      document.getElementById('generatedAt').style.display = 'none';
 
       // 섹션 내부 로딩 표시
       setChartsLoading();
@@ -268,9 +282,10 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            company_name: stock.corp_name,
-            stock_code:   stock.stock_code,
-            corp_code:    stock.corp_code,
+            company_name:  stock.corp_name,
+            stock_code:    stock.stock_code,
+            corp_code:     stock.corp_code,
+            force_refresh: forceRefresh,
           }),
         });
         if (_reqId !== myId) return;
@@ -286,8 +301,17 @@
         showErr('서버 연결 실패: ' + e.message);
         resetSections();
       } finally {
-        if (_reqId === myId) hideOverlay();
+        if (_reqId === myId) {
+          hideOverlay();
+          document.getElementById('updateBtn').disabled = false;
+        }
       }
+    }
+
+    /* ── 업데이트 버튼: 캐시 무시하고 API로 신규 보고서 생성 ── */
+    function updateReport() {
+      if (!currentStock) return;
+      analyze(currentStock, true);
     }
 
     /* ── 결과 렌더링 ── */
@@ -300,14 +324,21 @@
         data.shares_out > 0 ? data.shares_out.toLocaleString('ko-KR') + ' 주' : '-';
       document.getElementById('kpiRim').textContent = data.rim_str || '-';
 
-      // 차트: blob → iframe
-      const blob   = new Blob([data.charts_html], { type: 'text/html' });
-      const url    = URL.createObjectURL(blob);
-      const iframe = Object.assign(document.createElement('iframe'), {
-        src: url,
-        onload: () => URL.revokeObjectURL(url),
-      });
-      iframe.style.cssText = 'width:100%;height:950px;border:none;';
+      const genAtEl = document.getElementById('generatedAt');
+      if (data.generated_at) {
+        const dt = new Date(data.generated_at);
+        const label = data.from_cache ? '마지막 생성' : '방금 생성';
+        genAtEl.textContent = `🕘 ${label}: ${dt.toLocaleString('ko-KR')}`;
+        genAtEl.style.display = 'block';
+      } else {
+        genAtEl.style.display = 'none';
+      }
+
+      // 차트: 실제 서버 경로(/report/<code>)로 iframe 로드
+      // Blob URL은 origin이 없어 TradingView 위젯이 종목 심볼을 못 읽으므로 실제 HTTP 경로 사용
+      const iframe = document.createElement('iframe');
+      iframe.src = `${BASE}/report/${data.stock_code}`;
+      iframe.style.cssText = 'width:100%;height:1250px;border:none;';
       const cw = document.getElementById('chartsWrap');
       cw.innerHTML = '';
       cw.appendChild(iframe);

@@ -1,3 +1,9 @@
+def _build_broker_excerpt_block(broker_reports: list) -> str:
+    if not broker_reports:
+        return "(제공된 증권사 리포트 없음 — 투자 아이디어/리스크는 귀하의 지식으로 직접 도출)"
+    return "\n\n".join(f"### 리포트: {r['filename']}\n{r['text']}" for r in broker_reports)
+
+
 def generate_llm_prompt(result: dict) -> str:
     """
     수집·계산된 데이터를 LLM 분석 프롬프트로 변환
@@ -6,13 +12,14 @@ def generate_llm_prompt(result: dict) -> str:
       - rim_str 미정의 상태에서 f-string 참조 오류 수정
       - 보고서 섹션 번호 체계 정리 (## 6이 ## 1 내부에 있던 오류)
     """
-    name          = result['company_name']
-    stock_code    = result['stock_code']
-    current_price = result['current_price']
-    market_cap    = result['market_cap']
-    shares_out    = result['shares_out']
-    df_quarterly  = result['df_quarterly']
-    rim_value     = result['metrics'].get('rim_value') if result['metrics'] else None
+    name           = result['company_name']
+    stock_code     = result['stock_code']
+    current_price  = result['current_price']
+    market_cap     = result['market_cap']
+    shares_out     = result['shares_out']
+    df_quarterly   = result['df_quarterly']
+    rim_value      = result['metrics'].get('rim_value') if result['metrics'] else None
+    broker_reports = result.get('broker_reports') or []
 
     # 포맷 변환
     rim_str    = f"{rim_value:,.0f} 원" if isinstance(rim_value, (int, float)) else "데이터 부족"
@@ -32,8 +39,11 @@ def generate_llm_prompt(result: dict) -> str:
 1차 추정 RIM 내재가치: {rim_str}
 
 ---
-**[최근 2개년 분기별 핵심 재무 데이터]**
+**[최근 9개 분기 핵심 재무 데이터]**
 {quarterly_str}
+
+**[기존 증권사 리포트 발췌 (최신 {len(broker_reports)}건)]**
+{_build_broker_excerpt_block(broker_reports)}
 
 ---
 **[STEP 1: 1차 심층 분석]** — 즉시 수행
@@ -78,14 +88,18 @@ def generate_llm_prompt(result: dict) -> str:
 [해당 기업만의 해자 분석]
 
 ## 4. 투자 아이디어
-[핵심 포인트 3~4가지 상세 기술]
+[위 "기존 증권사 리포트 발췌"가 있다면 그 논거를 핵심 재료로 삼되, 귀하의 폭넓은 산업 지식을
+함께 결합하여 더 입체적인 핵심 포인트 3~4가지 상세 기술. 본문에 특정 증권사명·리포트 제목을
+직접 언급하지 말 것 (출처는 하단에 별도 첨부). 발췌가 없는 경우 귀하의 지식만으로 작성]
 
 ## 5. 기업가치 평가
 - **RIM 내재가치:** {rim_str} (기본값) → [분기 데이터 반영 AI 재산출]
 - **Forwarding POR:** [향후 2~3년 추정 실적 기반 산출]
 
 ## 6. 리스크 및 모니터링
-[발굴된 리스크 및 체크 변수 3가지]
+[위 "기존 증권사 리포트 발췌"에 언급된 우려사항이 있다면 핵심 재료로 반영하되, 귀하의 산업
+지식을 함께 결합해 더 종합적인 리스크 및 체크 변수 3가지 기술. 본문에 특정 증권사명·리포트
+제목을 직접 언급하지 말 것]
 
 ## 7. 결론 및 최종 투자의견
 [2~3줄 강력 요약 및 매수/중립/매도 의견]

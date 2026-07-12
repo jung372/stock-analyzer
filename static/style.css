@@ -165,6 +165,7 @@ button[type="submit"]:disabled { background: #93c5fd; cursor: not-allowed; }
   color: white;
 }
 .btn-print:hover { background: rgba(255,255,255,0.25); }
+.btn-print:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-back {
   background: #3b82f6;
   border: none;

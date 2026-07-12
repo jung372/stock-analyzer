@@ -14,21 +14,40 @@ def generate_report(result: dict) -> str:
     prompt = _build_prompt(result)
     message = _client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=8096,
+        max_tokens=16384,   # 증권사 리포트 발췌 추가로 응답이 길어져 8096에서 상향
         messages=[{"role": "user", "content": prompt}]
     )
-    return message.content[0].text
+    report_md = message.content[0].text
+    return _append_source_footer(report_md, result.get('broker_reports') or [])
+
+
+def _append_source_footer(report_md: str, broker_reports: list) -> str:
+    """
+    증권사 리포트 출처는 본문에 직접 언급하지 않도록 프롬프트로 지시하고,
+    대신 LLM이 아닌 코드가 직접 파일명 목록을 하단에 append (정확성 보장).
+    """
+    if not broker_reports:
+        return report_md
+    sources = "\n".join(f"- {r['filename']}" for r in broker_reports)
+    return f"{report_md}\n\n---\n**참고: 증권사 리포트 출처**\n{sources}\n"
+
+
+def _build_broker_excerpt_block(broker_reports: list) -> str:
+    if not broker_reports:
+        return "(제공된 증권사 리포트 없음 — 투자 아이디어/리스크는 귀하의 지식으로 직접 도출)"
+    return "\n\n".join(f"### 리포트: {r['filename']}\n{r['text']}" for r in broker_reports)
 
 
 def _build_prompt(result: dict) -> str:
-    name          = result['company_name']
-    stock_code    = result['stock_code']
-    current_price = result['current_price']
-    market_cap    = result['market_cap']
-    shares_out    = result['shares_out']
-    df_quarterly  = result['df_quarterly']
-    metrics       = result['metrics']
-    df_fin        = result['df_fin']
+    name           = result['company_name']
+    stock_code     = result['stock_code']
+    current_price  = result['current_price']
+    market_cap     = result['market_cap']
+    shares_out     = result['shares_out']
+    df_quarterly   = result['df_quarterly']
+    metrics        = result['metrics']
+    df_fin         = result['df_fin']
+    broker_reports = result.get('broker_reports') or []
 
     rim_value  = metrics.get('rim_value') if metrics else None
     rim_str    = f"{rim_value:,.0f} 원" if isinstance(rim_value, float) else "계산 불가"
@@ -64,8 +83,11 @@ RIM 내재가치 (ke=8%): {rim_str}
 [연간 수익성/안정성 지표 (최근 5년)]
 {annual_summary}
 
-[최근 2개년 분기별 재무제표]
+[최근 9개 분기 재무제표]
 {quarterly_str}
+
+[기존 증권사 리포트 발췌 (최신 {len(broker_reports)}건)]
+{_build_broker_excerpt_block(broker_reports)}
 
 ---
 [보고서 양식 - 아래 구조 그대로 작성, 섹션 누락 금지]
@@ -100,7 +122,11 @@ RIM 내재가치 (ke=8%): {rim_str}
 [{name}만의 지속 가능한 경쟁 해자를 구체적으로 분석]
 
 ## 4. 투자 아이디어
-[핵심 투자 포인트 3~4가지를 번호 목록으로 상세 기술]
+[위 "기존 증권사 리포트 발췌"가 있다면 그 논거(수주, 신사업, 실적 모멘텀 등)를 핵심 재료로 삼되,
+귀하가 알고 있는 폭넓은 산업 지식(경쟁구도, 매크로 트렌드, 기술 변화, 밸류체인 등)을 함께 결합하여
+더 입체적이고 종합적인 핵심 투자 포인트 3~4가지를 번호 목록으로 상세 기술하십시오.
+단, 본문에 특정 증권사명이나 리포트 제목을 직접 언급하지 마십시오 (출처는 보고서 하단에 별도 첨부됨).
+발췌가 없는 경우 귀하의 산업 지식만으로 작성하십시오.]
 
 ## 5. 기업가치 평가
 - **RIM 내재가치**: {rim_str} (ke=8% 적용) → [현재 주가 대비 괴리율 계산 및 해석]
@@ -108,6 +134,10 @@ RIM 내재가치 (ke=8%): {rim_str}
 - **PER/PBR 밴드 분석**: [AI 기입]
 
 ## 6. 리스크 및 모니터링
+[위 "기존 증권사 리포트 발췌"에 언급된 우려사항(고객사 집중, 경쟁 심화, 정책 리스크 등)이 있다면
+핵심 재료로 반영하되, 귀하의 산업 지식(구조적 리스크, 매크로 변수, 규제 동향 등)을 함께 결합하여
+더 종합적인 리스크를 도출하십시오. 본문에 특정 증권사명·리포트 제목을 직접 언급하지 마십시오.
+발췌가 없는 경우 귀하의 산업 지식만으로 작성하십시오.]
 1. [리스크 1]
 2. [리스크 2]
 3. [리스크 3]

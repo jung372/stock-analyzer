@@ -1,9 +1,8 @@
 import sqlite3
 import pathlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-DB_PATH         = pathlib.Path(__file__).parent / 'reports.db'
-CACHE_TTL_HOURS = 24  # 캐시 유효 시간 (시간 단위) — 필요시 조정
+DB_PATH = pathlib.Path(__file__).parent / 'reports.db'
 
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS reports (
@@ -34,7 +33,7 @@ def init_db() -> None:
 
 
 def get_cached_report(stock_code: str) -> dict | None:
-    """캐시된 리포트 반환. 없거나 TTL 초과 시 None"""
+    """캐시된 리포트 반환. 한 번이라도 생성된 적이 있으면 기간에 상관없이 마지막 버전을 반환. 없으면 None"""
     with _connect() as conn:
         row = conn.execute(
             'SELECT * FROM reports WHERE stock_code = ?', (stock_code,)
@@ -42,10 +41,6 @@ def get_cached_report(stock_code: str) -> dict | None:
 
     if row is None:
         return None
-
-    created_at = datetime.fromisoformat(row['created_at'])
-    if datetime.now(timezone.utc) - created_at > timedelta(hours=CACHE_TTL_HOURS):
-        return None  # 만료됨 — 재생성 필요
 
     return {
         'company_name':  row['company_name'],
@@ -56,6 +51,7 @@ def get_cached_report(stock_code: str) -> dict | None:
         'rim_str':       row['rim_str'],
         'charts_html':   row['charts_html'],
         'report_md':     row['report_md'],
+        'generated_at':  row['created_at'],
     }
 
 
