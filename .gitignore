@@ -21,3 +21,6 @@ output/
 # OS
 Thumbs.db
 .DS_Store
+
+# 자동 백업 스크립트 전용 로그 (git 추적 제외)
+WORKLOG.md
