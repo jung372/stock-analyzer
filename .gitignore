@@ -1,5 +1,6 @@
 # 환경변수 / 비밀키
 .env
+data/.naver_session.json
 
 # 캐시
 data/corps_cache.json

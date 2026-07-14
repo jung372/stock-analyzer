@@ -1,78 +1,5 @@
-import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-
-
-def draw_charts(result: dict) -> None:
-    """
-    3단 matplotlib 차트 렌더링
-
-    BUG FIX:
-      - 'import matplotlib.pyplot as plt' 누락 수정
-      - t.pause(2) → plt.pause(2) 수정
-      - 빈 DataFrame 접근 시 오류 방지 (axes.text 폴백)
-      - 매출액/자본 단위 억원으로 환산하여 y축 가독성 개선
-    """
-    matplotlib.rcParams['font.family']       = 'Malgun Gothic'
-    matplotlib.rcParams['axes.unicode_minus'] = False
-
-    df_price = result['df_price']
-    metrics  = result['metrics']
-    df_fin   = result['df_fin']
-    name     = result['company_name']
-
-    fig, axes = plt.subplots(3, 1, figsize=(12, 15))
-    fig.suptitle(f"{name} 가치투자 분석", fontsize=16, fontweight='bold')
-
-    # ── Chart 1: 10년 주가 추이
-    if not df_price.empty:
-        axes[0].plot(df_price.index, df_price['Close'],
-                     color='#1f77b4', linewidth=1.5)
-        axes[0].yaxis.set_major_formatter(
-            mticker.FuncFormatter(lambda x, _: f'{x:,.0f}')
-        )
-    else:
-        axes[0].text(0.5, 0.5, '주가 데이터 없음',
-                     ha='center', va='center', transform=axes[0].transAxes)
-    axes[0].set_title("10년 주가 추이", fontweight='bold')
-    axes[0].grid(True, linestyle='--', alpha=0.6)
-
-    # ── Chart 2: 수익성 트렌드 (Sales Bar / OPM·ROE Line, 이중축)
-    if metrics and not df_fin.empty:
-        ax2t = axes[1].twinx()
-        axes[1].bar(df_fin.columns, metrics['sales'] / 1e8,
-                    color='#e1e1e1', alpha=0.7, label='매출액(억원)')
-        ax2t.plot(df_fin.columns, metrics['opm'],
-                  color='blue',  marker='o', linewidth=1.5, label='OPM (%)')
-        ax2t.plot(df_fin.columns, metrics['roe'],
-                  color='red',   marker='s', linewidth=1.5, label='ROE (%)')
-        axes[1].legend(loc='upper left')
-        ax2t.legend(loc='upper right')
-    else:
-        axes[1].text(0.5, 0.5, '재무 데이터 없음',
-                     ha='center', va='center', transform=axes[1].transAxes)
-    axes[1].set_title("수익성 트렌드 (매출액 / OPM / ROE)", fontweight='bold')
-
-    # ── Chart 3: 자본구조 (Equity Bar / 부채비율 Line, 이중축)
-    if metrics and not df_fin.empty:
-        ax3t = axes[2].twinx()
-        axes[2].bar(df_fin.columns, metrics['equity'] / 1e8,
-                    color='#d6ffd6', alpha=0.7, label='자본총계(억원)')
-        ax3t.plot(df_fin.columns, metrics['debt_ratio'],
-                  color='purple', marker='^', linewidth=1.5, label='부채비율 (%)')
-        axes[2].legend(loc='upper left')
-        ax3t.legend(loc='upper right')
-    else:
-        axes[2].text(0.5, 0.5, '재무 데이터 없음',
-                     ha='center', va='center', transform=axes[2].transAxes)
-    axes[2].set_title("자본구조 (자본총계 / 부채비율)", fontweight='bold')
-
-    plt.tight_layout()
-    plt.show(block=False)
-    plt.pause(2)
-
 
 # 한국식 캔들 색상: 상승 빨강 / 하락 파랑
 _UP_COLOR   = '#ef4444'
@@ -159,7 +86,7 @@ def generate_plotly_html(result: dict, include_plotlyjs=False) -> str:
 
     # Chart 1: 수익성
     if metrics and not df_fin.empty:
-        cols = list(df_fin.columns)
+        cols = list(df_fin.index)
         fig.add_trace(go.Bar(
             x=cols, y=metrics['sales'] / 1e8,
             name='매출액(억원)', marker_color='#e2e8f0', opacity=0.8
@@ -177,7 +104,7 @@ def generate_plotly_html(result: dict, include_plotlyjs=False) -> str:
 
     # Chart 2: 자본구조
     if metrics and not df_fin.empty:
-        cols = list(df_fin.columns)
+        cols = list(df_fin.index)
         fig.add_trace(go.Bar(
             x=cols, y=metrics['equity'] / 1e8,
             name='자본총계(억원)', marker_color='#bbf7d0', opacity=0.8

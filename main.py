@@ -17,10 +17,9 @@ def main():
 
     company_name = input("분석할 기업명을 입력하세요 (예: 삼성전자): ").strip()
     stock_code   = input(f"{company_name}의 종목코드 (예: 005930): ").strip()
-    corp_code    = input(f"{company_name}의 DART 고유번호 (예: 00126380): ").strip()
 
     print("\n[1/3] 재무 데이터 수집 및 계산 중...")
-    result = run_analysis(company_name, stock_code, corp_code)
+    result = run_analysis(company_name, stock_code)
 
     print("[2/3] 차트 생성 중...")
     charts_html = generate_plotly_html(result)

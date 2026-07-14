@@ -93,7 +93,7 @@ def analyze():
             return jsonify(cached)
 
     try:
-        result      = run_analysis(company_name, stock_code, corp_code)
+        result      = run_analysis(company_name, stock_code)
         charts_html = generate_charts_html(result)
         report_md   = generate_report(result)
 

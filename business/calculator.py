@@ -1,40 +1,19 @@
-import numpy as np
 import pandas as pd
 
 
-def _safe_series(df: pd.DataFrame, *names: str) -> pd.Series:
-    """
-    계정과목 추출 — 여러 후보명 순서대로 시도, 모두 없으면 0 시리즈 반환
-    예) _safe_series(df, '당기순이익', '당기순이익(손실)')
-    DART 공시마다 계정과목 표기가 다를 수 있어 다중 후보 지원
-    """
-    for name in names:
-        if name in df.index:
-            return df.loc[name].copy()
-    return pd.Series(0, index=df.columns)
-
-
 def calc_opm(op_profit: pd.Series, sales: pd.Series) -> pd.Series:
-    return (op_profit / sales.replace(0, np.nan)) * 100
+    return (op_profit / sales.replace(0, float('nan'))) * 100
 
 
-def calc_roe(net_profit: pd.Series, equity: pd.Series) -> pd.Series:
-    return (net_profit / equity.replace(0, np.nan)) * 100
-
-
-def calc_debt_ratio(liabilities: pd.Series, equity: pd.Series) -> pd.Series:
-    return (liabilities / equity.replace(0, np.nan)) * 100
-
-
-def calc_rim(equity: pd.Series, roe: pd.Series, ke: float = 0.08) -> float | None:
+def calc_rim(bps: pd.Series, roe: pd.Series, ke: float = 0.08) -> float | None:
     """
-    RIM 내재가치 = BV + (BV × (ROE - ke)) / ke
+    RIM 주당 내재가치 = BPS + (BPS × (ROE - ke)) / ke
     ke: 자기자본비용 (기본값 8%)
 
-    BUG FIX: equity=0 일 때 (계정과목 미매칭) 0.0 반환 → None 반환으로 수정
+    주가와 직접 비교해야 하므로 총자본이 아닌 주당순자산(BPS) 기준으로 계산한다.
     """
     try:
-        bv      = equity.iloc[-1]
+        bv      = bps.iloc[-1]
         roe_val = roe.iloc[-1] / 100
         if pd.isna(bv) or pd.isna(roe_val) or bv == 0:
             return None
@@ -43,21 +22,28 @@ def calc_rim(equity: pd.Series, roe: pd.Series, ke: float = 0.08) -> float | Non
         return None
 
 
-def calc_all(df_fin: pd.DataFrame) -> dict:
-    """전체 재무 지표 일괄 계산 — df_fin이 비어 있으면 빈 dict 반환"""
-    if df_fin.empty:
+def calc_all(df_income_annual: pd.DataFrame, df_balance_annual: pd.DataFrame, df_ratio_annual: pd.DataFrame) -> dict:
+    """
+    연간(12월 결산 누적치) 지표 일괄 계산.
+
+    ROE/부채비율/증가율은 KIS 재무비율 API가 이미 계산해서 제공하므로 그대로 사용하고,
+    OPM만 손익계산서 원본(영업이익/매출액)으로 직접 계산한다.
+    (DART 시절의 계정과목 이름 매칭(_safe_series)이 더 이상 필요 없음 — KIS 응답은 컬럼명이 고정)
+    """
+    if df_income_annual.empty or df_ratio_annual.empty:
         return {}
 
-    sales       = _safe_series(df_fin, '매출액', '수익(매출액)', '영업수익')
-    op_profit   = _safe_series(df_fin, '영업이익', '영업이익(손실)')
-    net_profit  = _safe_series(df_fin, '당기순이익', '당기순이익(손실)')
-    equity      = _safe_series(df_fin, '자본총계', '자본합계')
-    liabilities = _safe_series(df_fin, '부채총계', '부채합계')
+    sales       = df_income_annual['매출액']
+    op_profit   = df_income_annual['영업이익']
+    net_profit  = df_income_annual['당기순이익']
+    equity      = df_balance_annual['자본총계'] if not df_balance_annual.empty else pd.Series(dtype=float)
+    liabilities = df_balance_annual['부채총계'] if not df_balance_annual.empty else pd.Series(dtype=float)
+    bps         = df_ratio_annual['BPS']
 
     opm        = calc_opm(op_profit, sales)
-    roe        = calc_roe(net_profit, equity)
-    debt_ratio = calc_debt_ratio(liabilities, equity)
-    rim_value  = calc_rim(equity, roe)
+    roe        = df_ratio_annual['ROE']
+    debt_ratio = df_ratio_annual['부채비율']
+    rim_value  = calc_rim(bps, roe)
 
     return {
         'sales':       sales,
