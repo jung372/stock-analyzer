@@ -103,6 +103,23 @@
       margin: -0.6rem 0 1rem;
       display: none;
     }
+
+    /* ── 네이버 카페 로그인 팝업 ── */
+    .cafe-popup-box { max-width: 400px; }
+    .cafe-popup-msg { color: #64748b; font-size: 0.9rem; margin: 0.6rem 0 1.4rem; line-height: 1.5; }
+    .cafe-popup-btns { display: flex; gap: 0.6rem; justify-content: center; }
+    .btn-cafe-yes, .btn-cafe-no {
+      padding: 0.6rem 1.2rem;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.92rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-cafe-yes { background: #1d4ed8; color: white; }
+    .btn-cafe-yes:hover { background: #1e40af; }
+    .btn-cafe-no { background: #e2e8f0; color: #1e293b; }
+    .btn-cafe-no:hover { background: #cbd5e1; }
   </style>
 </head>
 <body>
@@ -125,6 +142,28 @@
       <div class="spinner"></div>
       <p class="loading-title" id="loadingTitle">분석 준비 중...</p>
       <p class="loading-sub"   id="loadingStep">잠시만 기다려 주세요</p>
+    </div>
+  </div>
+
+  <!-- ══ 네이버 카페 로그인 팝업 ══ -->
+  <div id="cafePopup" class="loading-overlay" style="display:none;">
+    <div class="loading-box cafe-popup-box">
+      <div id="cafePopupAsk">
+        <p class="loading-title">💬 네이버 카페 연동</p>
+        <p class="cafe-popup-msg">
+          네이버 카페(주담통화 · 탐방) 로그인 후 관련 게시글을 리포트에 반영할까요?<br>
+          "아니오"를 선택하면 카페 게시글 없이 바로 분석을 진행합니다.
+        </p>
+        <div class="cafe-popup-btns">
+          <button class="btn-cafe-yes" id="cafeYesBtn">예, 로그인할게요</button>
+          <button class="btn-cafe-no"  id="cafeNoBtn">아니오, 건너뛸게요</button>
+        </div>
+      </div>
+      <div id="cafePopupWaiting" style="display:none;">
+        <div class="spinner"></div>
+        <p class="loading-title">브라우저 창에서 로그인해주세요</p>
+        <p class="loading-sub">로그인이 완료되면 자동으로 분석이 시작됩니다 (최대 8분 대기)</p>
+      </div>
     </div>
   </div>
 
@@ -179,10 +218,10 @@
   <script>
     const BASE = 'http://localhost:5000';
     const STEPS = [
-      '네이버 금융 데이터 수집 중...',
+      'KIS 실시간 시세 조회 중...',
       '10년 주가 히스토리 수집 중...',
-      'DART 연간 재무제표 수집 중...',
-      'DART 분기 재무제표 수집 중...',
+      'KIS 손익계산서/재무비율 조회 중...',
+      '증권사 리포트 · 네이버 카페 게시글 탐색 중...',
       '재무 지표 계산 중...',
       'Claude AI 보고서 생성 중...',
     ];
@@ -254,8 +293,65 @@
       analyze(stock);
     }
 
-    /* ── 분석 실행 ── */
+    /* ── 네이버 카페 로그인 게이트 ──
+       분석 실행 전, 카페 세션이 없으면 로그인 여부를 묻는 팝업을 띄운다.
+       (이미 로그인돼 있거나, 이전에 "아니오"를 선택했다면 바로 분석 진행) */
+    const CAFE_SKIP_KEY = 'naverCafeSkip';
+
     async function analyze(stock, forceRefresh = false) {
+      if (sessionStorage.getItem(CAFE_SKIP_KEY) === '1') {
+        return _doAnalyze(stock, forceRefresh);
+      }
+      try {
+        const res = await fetch(`${BASE}/naver-cafe/status`);
+        const st  = await res.json();
+        if (st.logged_in) return _doAnalyze(stock, forceRefresh);
+      } catch {
+        // 상태 확인 자체가 실패해도 분석은 정상 진행 (카페 데이터는 서버에서 이미 안전하게 폴백됨)
+        return _doAnalyze(stock, forceRefresh);
+      }
+      showCafePopup(stock, forceRefresh);
+    }
+
+    function showCafePopup(stock, forceRefresh) {
+      document.getElementById('cafePopupAsk').style.display     = 'block';
+      document.getElementById('cafePopupWaiting').style.display = 'none';
+      document.getElementById('cafePopup').style.display = 'flex';
+
+      document.getElementById('cafeYesBtn').onclick = async () => {
+        document.getElementById('cafePopupAsk').style.display     = 'none';
+        document.getElementById('cafePopupWaiting').style.display = 'block';
+        await startCafeLoginAndWait();
+        document.getElementById('cafePopup').style.display = 'none';
+        _doAnalyze(stock, forceRefresh);
+      };
+
+      document.getElementById('cafeNoBtn').onclick = () => {
+        sessionStorage.setItem(CAFE_SKIP_KEY, '1');
+        document.getElementById('cafePopup').style.display = 'none';
+        _doAnalyze(stock, forceRefresh);
+      };
+    }
+
+    async function startCafeLoginAndWait() {
+      try {
+        await fetch(`${BASE}/naver-cafe/login`, { method: 'POST' });
+      } catch {
+        return; // 로그인 트리거 실패 시에도 분석은 계속 진행 (카페 없이)
+      }
+      const deadline = Date.now() + 8 * 60 * 1000; // 백엔드 LOGIN_TIMEOUT_SEC(480초)와 동일
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          const res = await fetch(`${BASE}/naver-cafe/status`);
+          const st  = await res.json();
+          if (st.logged_in) return;
+        } catch { /* 다음 폴링에서 재시도 */ }
+      }
+    }
+
+    /* ── 분석 실행 ── */
+    async function _doAnalyze(stock, forceRefresh = false) {
       const myId = ++_reqId;
       currentStock = stock;
 

@@ -18,6 +18,7 @@ from presentation.charts import generate_charts_html
 from llm.claude_client   import generate_report
 from data.stock_list     import load_corp_list, search_corps
 from data.report_cache   import init_db, get_cached_report, save_report
+from data.naver_cafe     import has_valid_session, login_in_progress, run_login_flow
 from backup_reports      import backup as backup_reports
 
 app          = Flask(__name__)
@@ -56,6 +57,22 @@ def status():
 def stocks():
     q = request.args.get('q', '').strip()
     return jsonify(search_corps(_corps, q))
+
+
+@app.route('/naver-cafe/status')
+def naver_cafe_status():
+    """다른 사람이 이 앱을 처음 실행하는 경우 등, 네이버 카페 로그인 여부를 프론트엔드 팝업이 확인하는 용도"""
+    return jsonify({'logged_in': has_valid_session(), 'in_progress': login_in_progress()})
+
+
+@app.route('/naver-cafe/login', methods=['POST'])
+def naver_cafe_login():
+    """팝업에서 '예'를 선택하면 호출 — 브라우저 로그인 창을 백그라운드 스레드로 띄우고 즉시 응답.
+    프론트엔드는 /naver-cafe/status를 폴링해서 로그인 완료를 감지한다."""
+    if login_in_progress():
+        return jsonify({'started': False, 'already_running': True})
+    threading.Thread(target=run_login_flow, kwargs={'headless': False}, daemon=True).start()
+    return jsonify({'started': True})
 
 
 @app.route('/report/<stock_code>')
