@@ -1,11 +1,13 @@
 import os
 import re
 import pathlib
+from datetime import datetime, timedelta
 
 from pypdf import PdfReader
 
-DEFAULT_BASE_FOLDER = r"G:\내 드라이브\02 주식\02 섹터 및 종목 내용 정리"
-MAX_FILES_PER_STOCK  = 5      # 최신 mtime 순 상위 5개 PDF만 사용
+DEFAULT_BASE_FOLDER  = r"G:\내 드라이브\02 주식\02 섹터 및 종목 내용 정리"
+MAX_FILES_PER_STOCK  = 10     # 최신 mtime 순 상위 10개 PDF만 사용
+MAX_MONTHS_LOOKBACK  = 12     # 최근 12개월 이내 파일만 대상
 MAX_PAGES_PER_FILE   = 2      # 파일당 첫 2페이지만 (핵심 결론이 보통 앞부분에 요약됨)
 MAX_CHARS_PER_FILE   = 3000   # 파일당 텍스트 상한
 
@@ -49,8 +51,9 @@ def find_stock_folder(company_name: str, base_folder: str | None = None) -> path
 
 def extract_broker_reports(folder: pathlib.Path) -> list[dict]:
     """폴더 내 PDF에서 텍스트 추출. 최신 수정일 순, 개별 파일 실패는 skip하고 계속 진행."""
+    cutoff = (datetime.now() - timedelta(days=MAX_MONTHS_LOOKBACK * 30)).timestamp()
     pdfs = sorted(folder.glob('*.pdf'), key=lambda p: p.stat().st_mtime, reverse=True)
-    pdfs = pdfs[:MAX_FILES_PER_STOCK]
+    pdfs = [p for p in pdfs if p.stat().st_mtime >= cutoff][:MAX_FILES_PER_STOCK]
 
     reports = []
     for pdf_path in pdfs:
