@@ -5,6 +5,7 @@ data/.naver_session.json
 # 캐시
 data/corps_cache.json
 data/reports.db
+data/reports/
 __pycache__/
 **/__pycache__/
 *.pyc

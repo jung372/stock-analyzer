@@ -164,6 +164,16 @@
         <p class="loading-title">브라우저 창에서 로그인해주세요</p>
         <p class="loading-sub">로그인이 완료되면 자동으로 분석이 시작됩니다 (최대 8분 대기)</p>
       </div>
+      <div id="cafePopupRemote" style="display:none;">
+        <p class="loading-title">💬 네이버 카페 연동</p>
+        <p class="cafe-popup-msg">
+          네이버 카페 세션이 없어 <b>카페 데이터 없이</b> 보고서를 생성합니다.<br>
+          카페(주담통화·탐방) 연동은 <b>PC에서 로그인</b> 후 이용할 수 있습니다.
+        </p>
+        <div class="cafe-popup-btns">
+          <button class="btn-cafe-yes" id="cafeRemoteOkBtn">카페 없이 생성</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -216,7 +226,10 @@
   </div><!-- /container -->
 
   <script>
-    const BASE = 'http://localhost:5000';
+    // same-origin — localhost, tailnet IP, 어디로 접속하든 자동으로 맞음
+    const BASE = window.location.origin;
+    // 로컬(PC) 여부 — 대화형 네이버 로그인은 PC에서만 가능
+    const IS_LOCAL = ['localhost', '127.0.0.1', '[::1]', ''].includes(window.location.hostname);
     const STEPS = [
       'KIS 실시간 시세 조회 중...',
       '10년 주가 히스토리 수집 중...',
@@ -299,6 +312,10 @@
     const CAFE_SKIP_KEY = 'naverCafeSkip';
 
     async function analyze(stock, forceRefresh = false) {
+      // 열람 우선: 업데이트가 아니면 저장된 보고서를 먼저 시도 (생성/카페 게이트 없이 즉시)
+      if (!forceRefresh && await viewCached(stock)) return;
+
+      // 여기부터는 실제 생성이 필요한 경로 → 네이버 카페 게이트
       if (sessionStorage.getItem(CAFE_SKIP_KEY) === '1') {
         return _doAnalyze(stock, forceRefresh);
       }
@@ -310,12 +327,43 @@
         // 상태 확인 자체가 실패해도 분석은 정상 진행 (카페 데이터는 서버에서 이미 안전하게 폴백됨)
         return _doAnalyze(stock, forceRefresh);
       }
-      showCafePopup(stock, forceRefresh);
+      // 세션 없음: PC면 대화형 로그인 팝업, 모바일/원격이면 안내 후 카페 없이 생성
+      if (IS_LOCAL) showCafePopup(stock, forceRefresh);
+      else          showCafeRemoteNotice(stock, forceRefresh);
+    }
+
+    /* 저장된 보고서(정적 JSON)를 즉시 열람 — 있으면 true, 없으면 false */
+    async function viewCached(stock) {
+      try {
+        const res = await fetch(`${BASE}/reports/${stock.stock_code}.json`, { cache: 'no-store' });
+        if (!res.ok) return false;
+        const rec = await res.json();
+        rec.from_cache = true;
+        currentStock = stock;
+        prepHeader(stock);
+        renderReport(rec);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    /* 모바일/원격에서 카페 세션이 없을 때: 로그인 대신 안내만 하고 카페 없이 생성 */
+    function showCafeRemoteNotice(stock, forceRefresh) {
+      document.getElementById('cafePopupAsk').style.display     = 'none';
+      document.getElementById('cafePopupWaiting').style.display = 'none';
+      document.getElementById('cafePopupRemote').style.display  = 'block';
+      document.getElementById('cafePopup').style.display = 'flex';
+      document.getElementById('cafeRemoteOkBtn').onclick = () => {
+        document.getElementById('cafePopup').style.display = 'none';
+        _doAnalyze(stock, forceRefresh);
+      };
     }
 
     function showCafePopup(stock, forceRefresh) {
       document.getElementById('cafePopupAsk').style.display     = 'block';
       document.getElementById('cafePopupWaiting').style.display = 'none';
+      document.getElementById('cafePopupRemote').style.display  = 'none';
       document.getElementById('cafePopup').style.display = 'flex';
 
       document.getElementById('cafeYesBtn').onclick = async () => {
@@ -350,12 +398,8 @@
       }
     }
 
-    /* ── 분석 실행 ── */
-    async function _doAnalyze(stock, forceRefresh = false) {
-      const myId = ++_reqId;
-      currentStock = stock;
-
-      // 헤더 즉시 업데이트
+    /* 헤더 즉시 업데이트(제목/버튼/KPI 리셋) */
+    function prepHeader(stock) {
       document.getElementById('reportTitle').innerHTML =
         `${stock.corp_name} <span class="stock-code">${stock.stock_code}</span>`;
       document.getElementById('headerBtns').style.visibility = 'visible';
@@ -365,12 +409,16 @@
       );
       document.getElementById('errBanner').style.display = 'none';
       document.getElementById('generatedAt').style.display = 'none';
+    }
 
-      // 섹션 내부 로딩 표시
+    /* ── 분석 실행 (비동기 job + 폴링) ── */
+    async function _doAnalyze(stock, forceRefresh = false) {
+      const myId = ++_reqId;
+      currentStock = stock;
+
+      prepHeader(stock);
       setChartsLoading();
       setReportLoading();
-
-      // 전체 오버레이
       showOverlay();
 
       try {
@@ -389,8 +437,10 @@
         const data = await res.json();
         if (_reqId !== myId) return;
 
-        if (data.error) { showErr(data.error); resetSections(); return; }
-        render(data);
+        if (data.error)             { showErr(data.error); resetSections(); return; }
+        if (data.status === 'done') { renderReport(data.payload); return; }
+        if (data.status === 'running') { await pollJob(data.job_id, myId); return; }
+        showErr('알 수 없는 서버 응답'); resetSections();
 
       } catch (e) {
         if (_reqId !== myId) return;
@@ -404,6 +454,33 @@
       }
     }
 
+    /* 생성 job이 끝날 때까지 상태 폴링. 폰 화면이 꺼져 폴링이 멈춰도
+       PC 워커는 끝까지 돌아 저장하므로, 다시 열면 열람 우선 흐름으로 결과가 보인다. */
+    async function pollJob(jobId, myId) {
+      while (true) {
+        await new Promise(r => setTimeout(r, 2500));
+        if (_reqId !== myId) return;
+
+        let st;
+        try {
+          const res = await fetch(`${BASE}/analyze/status/${jobId}`);
+          st = await res.json();
+        } catch {
+          continue;  // 일시적 네트워크 오류 → 다음 폴링에서 재시도
+        }
+        if (_reqId !== myId) return;
+
+        if (st.step) {
+          document.getElementById('loadingStep').textContent = st.step;
+          const el = document.getElementById('stepMsg');
+          if (el) el.textContent = st.step;
+        }
+        if (st.status === 'done')    { renderReport(st.payload); return; }
+        if (st.status === 'error')   { showErr(st.error || '생성 실패'); resetSections(); return; }
+        if (st.status === 'unknown') { showErr('작업을 찾을 수 없습니다. 다시 시도해 주세요.'); resetSections(); return; }
+      }
+    }
+
     /* ── 업데이트 버튼: 캐시 무시하고 API로 신규 보고서 생성 ── */
     function updateReport() {
       if (!currentStock) return;
@@ -411,7 +488,7 @@
     }
 
     /* ── 결과 렌더링 ── */
-    function render(data) {
+    function renderReport(data) {
       document.getElementById('kpiPrice').textContent =
         data.current_price > 0 ? data.current_price.toLocaleString('ko-KR') + ' 원' : '-';
       document.getElementById('kpiMcap').textContent =
@@ -430,16 +507,19 @@
         genAtEl.style.display = 'none';
       }
 
-      // 차트: 실제 서버 경로(/report/<code>)로 iframe 로드
-      // Blob URL은 origin이 없어 TradingView 위젯이 종목 심볼을 못 읽으므로 실제 HTTP 경로 사용
+      // 차트: 정적 파일(/reports/<code>_charts.html)을 iframe으로 로드.
+      // 실제 origin(same-origin)으로 서빙되므로 Plotly가 정상 렌더된다.
+      // 생성시각을 쿼리로 붙여 업데이트 후 캐시된 이전 차트가 뜨지 않게 한다.
+      const ver = encodeURIComponent(data.generated_at || '');
       const iframe = document.createElement('iframe');
-      iframe.src = `${BASE}/report/${data.stock_code}`;
+      iframe.src = `${BASE}/reports/${data.stock_code}_charts.html?v=${ver}`;
       iframe.style.cssText = 'width:100%;height:1250px;border:none;';
       const cw = document.getElementById('chartsWrap');
       cw.innerHTML = '';
       cw.appendChild(iframe);
 
       document.getElementById('reportWrap').innerHTML = marked.parse(data.report_md);
+      document.getElementById('updateBtn').disabled = false;
       window.scrollTo(0, 0);
     }
 

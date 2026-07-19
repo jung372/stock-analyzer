@@ -1,4 +1,5 @@
 import os
+import pandas as pd
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
@@ -18,6 +19,8 @@ def generate_report(result: dict) -> str:
         messages=[{"role": "user", "content": prompt}]
     )
     report_md = message.content[0].text
+    # 재무제표 표는 LLM이 재생성하지 않고 코드가 정확히 주입 (숫자 정확성 보증)
+    report_md = _inject_financials(report_md, result)
     report_md = _append_source_footer(report_md, result.get('broker_reports') or [])
     report_md = _append_cafe_source_footer(report_md, result.get('cafe_posts') or [])
     return report_md
@@ -58,6 +61,86 @@ def _build_cafe_excerpt_block(cafe_posts: list) -> str:
         f"### [{p['board']}] {p['title']} ({p['date']}, {p['author']})\n{p['text']}"
         for p in cafe_posts
     )
+
+
+def _inject_financials(report_md: str, result: dict) -> str:
+    """'## 2. 재무제표 현황' 섹션의 해설 뒤(다음 '## ' 섹션 앞)에 실제 재무제표 표를 삽입.
+
+    LLM에게 표를 그리게 하지 않고(수치 부정확 위험) 코드가 위치 기반으로 삽입한다.
+    LLM이 실수로 남길 수 있는 {{FINANCIALS_TABLE}}/{FINANCIALS_TABLE} 자리표시자는 제거한다.
+    """
+    import re
+    block = _build_financials_block(result)
+
+    # 혹시 남아있을 자리표시자 토큰 제거 (홑/겹중괄호 모두)
+    report_md = re.sub(r'\{\{?\s*FINANCIALS_TABLE\s*\}?\}', '', report_md)
+
+    m = re.search(r'^##\s*2\..*재무제표.*$', report_md, flags=re.MULTILINE)
+    if not m:
+        # 헤더를 못 찾으면 보고서 끝에 별도 섹션으로 덧붙임
+        return f"{report_md.rstrip()}\n\n## 재무제표 현황\n\n{block}\n"
+
+    # 섹션 2 다음의 '## ' 헤더 위치를 찾아 그 앞에 표 삽입 (해설 뒤에 위치)
+    nxt = re.search(r'^##\s', report_md[m.end():], flags=re.MULTILINE)
+    if nxt:
+        insert_pos = m.end() + nxt.start()
+        return report_md[:insert_pos].rstrip() + '\n\n' + block + '\n\n' + report_md[insert_pos:]
+    return report_md.rstrip() + '\n\n' + block + '\n'
+
+
+def _fmt_eok(v) -> str:
+    """원 단위 값 → 억원 콤마 문자열 (지수표기 방지). NaN은 '-'."""
+    return '-' if pd.isna(v) else f'{v / 1e8:,.0f}'
+
+
+def _fmt_pct(v) -> str:
+    return '-' if pd.isna(v) else f'{v:.1f}'
+
+
+def _build_financials_block(result: dict) -> str:
+    """재무제표 표(연간 5년 요약 + 분기 9개 손익)를 마크다운으로 생성.
+
+    숫자 정확성을 코드가 보증하기 위해 LLM이 아닌 여기서 직접 표를 만든다
+    (출처 footer를 코드가 append하는 것과 동일한 철학). 값은 콤마 문자열로 포맷해
+    전치·혼합 dtype으로 인한 지수표기(2.79e+06)를 원천 차단한다.
+    """
+    metrics      = result.get('metrics') or {}
+    df_fin       = result.get('df_fin')
+    df_quarterly = result.get('df_quarterly')
+
+    parts = []
+
+    # 연간 실적 추이 (최근 5년)
+    if metrics and df_fin is not None and not df_fin.empty:
+        years    = df_fin.index.tolist()[-5:]
+        year_str = [str(y) for y in years]
+
+        def _eok_row(series):
+            return [_fmt_eok(v) for v in series.reindex(years)]
+
+        def _pct_row(series):
+            return [_fmt_pct(v) for v in series.reindex(years)]
+
+        annual = pd.DataFrame({
+            '매출액(억원)':     _eok_row(metrics['sales']),
+            '영업이익(억원)':   _eok_row(metrics['op_profit']),
+            '당기순이익(억원)': _eok_row(metrics['net_profit']),
+            'OPM(%)':          _pct_row(metrics['opm']),
+            'ROE(%)':          _pct_row(metrics['roe']),
+            '부채비율(%)':      _pct_row(metrics['debt_ratio']),
+        }, index=year_str).T
+        # disable_numparse: tabulate가 콤마 문자열을 숫자로 재파싱해 지수표기(2.79e+06)로
+        # 바꾸는 것을 방지 — 이미 포맷된 문자열을 그대로 표시
+        parts.append('**연간 실적 추이 (최근 5년)**\n\n' + annual.to_markdown(disable_numparse=True))
+
+    # 분기 손익 (최근 9개 분기, 억원) — df_quarterly는 원 단위, _fmt_eok가 억원으로 변환
+    if df_quarterly is not None and not df_quarterly.empty:
+        q_str = df_quarterly.map(_fmt_eok)
+        parts.append('**분기 손익 (최근 9개 분기, 단위: 억원)**\n\n' + q_str.to_markdown(disable_numparse=True))
+
+    if not parts:
+        return '_재무제표 데이터를 수집하지 못했습니다._'
+    return '\n\n'.join(parts)
 
 
 def _build_prompt(result: dict) -> str:
@@ -155,25 +238,30 @@ RIM 내재가치 (ke=8%): {rim_str}
 ### 5) 재무현황 요약
 [연간 지표 기반 매출/이익/부채 트렌드 핵심 2줄 요약]
 
-## 2. 주요 고객 및 경쟁사 비교
+## 2. 재무제표 현황
+[연간·분기 재무제표의 핵심 추세(성장성/수익성/안정성)를 2~3줄로만 해설하십시오.
+표와 수치 데이터는 코드가 이 해설 바로 아래에 자동으로 삽입하므로, 귀하는 표나
+구체적 숫자 나열을 절대 작성하지 말고 해설 문장만 쓰십시오.]
+
+## 3. 주요 고객 및 경쟁사 비교
 [주요 고객사 및 경쟁사 대비 포지셔닝 분석]
 
-## 3. 경쟁우위요소 (Economic Moat)
+## 4. 경쟁우위요소 (Economic Moat)
 [{name}만의 지속 가능한 경쟁 해자를 구체적으로 분석]
 
-## 4. 투자 아이디어
+## 5. 투자 아이디어
 [위 "기존 증권사 리포트 발췌"와 "카페 IR콜/탐방 메모 발췌"가 있다면 그 논거(수주, 신사업, 실적 모멘텀,
 현장 코멘트 등)를 핵심 재료로 삼되, 귀하가 알고 있는 폭넓은 산업 지식(경쟁구도, 매크로 트렌드, 기술 변화,
 밸류체인 등)을 함께 결합하여 더 입체적이고 종합적인 핵심 투자 포인트 3~4가지를 번호 목록으로 상세 기술하십시오.
 단, 본문에 특정 증권사명·리포트 제목이나 카페 게시글 제목·작성자를 직접 언급하지 마십시오
 (출처는 보고서 하단에 별도 첨부됨). 발췌가 없는 경우 귀하의 산업 지식만으로 작성하십시오.]
 
-## 5. 기업가치 평가
+## 6. 기업가치 평가
 - **RIM 내재가치**: {rim_str} (ke=8% 적용) → [현재 주가 대비 괴리율 계산 및 해석]
 - **Forwarding POR**: [분기 모멘텀 반영 향후 2~3년 추정 실적 기반 산출]
 - **PER/PBR 밴드 분석**: [AI 기입]
 
-## 6. 리스크 및 모니터링
+## 7. 리스크 및 모니터링
 [위 "기존 증권사 리포트 발췌"와 "카페 IR콜/탐방 메모 발췌"에 언급된 우려사항(고객사 집중, 경쟁 심화,
 정책 리스크 등)이 있다면 핵심 재료로 반영하되, 귀하의 산업 지식(구조적 리스크, 매크로 변수, 규제 동향 등)을
 함께 결합하여 더 종합적인 리스크를 도출하십시오. 본문에 특정 증권사명·리포트 제목이나 카페 게시글
@@ -182,6 +270,6 @@ RIM 내재가치 (ke=8%): {rim_str}
 2. [리스크 2]
 3. [리스크 3]
 
-## 7. 결론 및 최종 투자의견
+## 8. 결론 및 최종 투자의견
 [2~3줄 강력한 요약 및 매수/중립/매도 의견과 목표주가 제시]
 """

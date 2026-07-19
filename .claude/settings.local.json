@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(Get-ChildItem \"D:\\\\05 AI 스터디\\\\stock_analyzer\" -Recurse | Select-Object FullName, Extension | Where-Object { $_.Extension -ne \"\" })"
+      "PowerShell(Get-ChildItem \"D:\\\\05 AI 스터디\\\\stock_analyzer\" -Recurse | Select-Object FullName, Extension | Where-Object { $_.Extension -ne \"\" })",
+      "PowerShell(tailscale status *)",
+      "PowerShell(tailscale ip *)"
     ]
   }
 }
