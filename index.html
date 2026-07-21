@@ -518,7 +518,9 @@
       cw.innerHTML = '';
       cw.appendChild(iframe);
 
-      document.getElementById('reportWrap').innerHTML = marked.parse(data.report_md);
+      const _renderer = new marked.Renderer();
+      _renderer.del = ({ text }) => text;
+      document.getElementById('reportWrap').innerHTML = marked.parse(data.report_md, { renderer: _renderer });
       document.getElementById('updateBtn').disabled = false;
       window.scrollTo(0, 0);
     }
