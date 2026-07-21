@@ -83,7 +83,8 @@ def get_realtime_quote(stock_code: str) -> dict:
     except Exception as e:
         print(f"⚠️ KIS 시세 조회 실패: {e}")
         return {'current_price': 0, 'market_cap': 0, 'shares_out': 0,
-                'per': None, 'pbr': None, 'eps': None, 'bps': None, 'foreign_ratio': None}
+                'per': None, 'pbr': None, 'eps': None, 'bps': None, 'foreign_ratio': None,
+                'beta': None}
 
     out = body.get('output', {})
     return {
@@ -95,6 +96,7 @@ def get_realtime_quote(stock_code: str) -> dict:
         'eps':             _to_float(out.get('eps')),
         'bps':             _to_float(out.get('bps')),
         'foreign_ratio':   _to_float(out.get('hts_frgn_ehrt')),
+        'beta':            _to_float(out.get('bta_val')),
     }
 
 

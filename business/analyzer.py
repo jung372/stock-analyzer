@@ -1,14 +1,41 @@
 import datetime
 
+import numpy as np
+import pandas as pd
 from dateutil.relativedelta import relativedelta
 
 from data.kis_api        import (get_realtime_quote, get_quarterly_income_statement,
                                   isolate_quarters, get_balance_sheet, get_financial_ratios,
                                   annual_view)
-from data.price_data     import get_price_history
+from data.price_data     import get_price_history, get_kospi_history
 from data.drive_reports  import get_broker_reports_for
 from data.naver_cafe     import get_cafe_posts_for
 from business.calculator import calc_all
+
+
+def _calc_beta_fdr(stock_code: str, df_price: pd.DataFrame) -> float | None:
+    """df_price(종목 일봉)와 KOSPI 지수를 이용해 beta를 계산. 공통 날짜 60일 미만이면 None."""
+    try:
+        if df_price.empty:
+            return None
+        end   = df_price.index[-1].strftime('%Y-%m-%d')
+        start = (df_price.index[-1] - pd.DateOffset(years=2)).strftime('%Y-%m-%d')
+        kospi = get_kospi_history(start, end)
+        if kospi.empty:
+            return None
+
+        stock_ret = df_price['Close'].pct_change().dropna()
+        kospi_ret = kospi['Close'].pct_change().dropna()
+        common    = stock_ret.index.intersection(kospi_ret.index)
+        if len(common) < 60:
+            return None
+
+        x    = kospi_ret.loc[common].values
+        y    = stock_ret.loc[common].values
+        beta = float(np.cov(y, x)[0, 1] / np.var(x))
+        return beta
+    except Exception:
+        return None
 
 QUARTERS_TO_SHOW = 9
 
@@ -64,7 +91,17 @@ def run_analysis(company_name: str, stock_code: str) -> dict:
         cafe_posts = []
 
     # ── Tier 2: 지표 계산
-    metrics = calc_all(df_fin_annual, df_balance_annual, df_ratio_annual)
+    beta = quote.get('beta')
+    if not beta or beta == 0:
+        print("  β KIS 미제공 → FDR 회귀분석으로 계산 중...")
+        beta = _calc_beta_fdr(stock_code, df_price)
+    if not beta:
+        beta = 1.0
+        print(f"  β = {beta:.3f} (기본값)")
+    else:
+        print(f"  β = {beta:.3f}")
+
+    metrics = calc_all(df_fin_annual, df_balance_annual, df_ratio_annual, beta=beta)
 
     print("\n✅ 데이터 수집 및 계산 완료\n")
 

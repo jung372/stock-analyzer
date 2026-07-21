@@ -1,34 +1,72 @@
+import os
+
 import pandas as pd
+from dotenv import load_dotenv
+
+load_dotenv()
+
+_RF  = float(os.getenv('RIM_RF',  '0.028'))
+_ERP = float(os.getenv('RIM_ERP', '0.055'))
+_G   = float(os.getenv('RIM_G',   '0.030'))
 
 
 def calc_opm(op_profit: pd.Series, sales: pd.Series) -> pd.Series:
     return (op_profit / sales.replace(0, float('nan'))) * 100
 
 
-def calc_rim(bps: pd.Series, roe: pd.Series, ke: float = 0.08) -> float | None:
+def calc_rim(
+    bps: pd.Series,
+    roe: pd.Series,
+    beta: float = 1.0,
+    rf: float | None = None,
+    erp: float | None = None,
+    g: float | None = None,
+) -> tuple[float | None, float]:
     """
-    RIM 주당 내재가치 = BPS + (BPS × (ROE - ke)) / ke
-    ke: 자기자본비용 (기본값 8%)
+    RIM 주당 내재가치 = BPS + (BPS × (ROE_avg - ke)) / (ke - g)
 
-    주가와 직접 비교해야 하므로 총자본이 아닌 주당순자산(BPS) 기준으로 계산한다.
+    ke = rf + beta × ERP  (CAPM)
+    ROE_avg = 최근 4개년 평균 ROE (데이터 부족 시 가용 데이터 전체 평균)
+    g = 영구성장률 (고정)
+
+    반환: (내재가치, 실제 사용된 ke)
     """
+    rf  = _RF  if rf  is None else rf
+    erp = _ERP if erp is None else erp
+    g   = _G   if g   is None else g
+
+    ke = rf + beta * erp
+
+    if ke <= g:
+        return None, ke
+
     try:
-        bv      = bps.iloc[-1]
-        roe_val = roe.iloc[-1] / 100
-        if pd.isna(bv) or pd.isna(roe_val) or bv == 0:
-            return None
-        return bv + (bv * (roe_val - ke)) / ke
+        bv = bps.iloc[-1]
+        roe_vals = roe.dropna()
+        if len(roe_vals) == 0:
+            return None, ke
+        roe_avg = roe_vals.iloc[-4:].mean() / 100
+
+        if pd.isna(bv) or pd.isna(roe_avg) or bv == 0:
+            return None, ke
+
+        value = bv + (bv * (roe_avg - ke)) / (ke - g)
+        return value, ke
     except Exception:
-        return None
+        return None, ke
 
 
-def calc_all(df_income_annual: pd.DataFrame, df_balance_annual: pd.DataFrame, df_ratio_annual: pd.DataFrame) -> dict:
+def calc_all(
+    df_income_annual: pd.DataFrame,
+    df_balance_annual: pd.DataFrame,
+    df_ratio_annual: pd.DataFrame,
+    beta: float = 1.0,
+) -> dict:
     """
     연간(12월 결산 누적치) 지표 일괄 계산.
 
     ROE/부채비율/증가율은 KIS 재무비율 API가 이미 계산해서 제공하므로 그대로 사용하고,
     OPM만 손익계산서 원본(영업이익/매출액)으로 직접 계산한다.
-    (DART 시절의 계정과목 이름 매칭(_safe_series)이 더 이상 필요 없음 — KIS 응답은 컬럼명이 고정)
     """
     if df_income_annual.empty or df_ratio_annual.empty:
         return {}
@@ -43,7 +81,7 @@ def calc_all(df_income_annual: pd.DataFrame, df_balance_annual: pd.DataFrame, df
     opm        = calc_opm(op_profit, sales)
     roe        = df_ratio_annual['ROE']
     debt_ratio = df_ratio_annual['부채비율']
-    rim_value  = calc_rim(bps, roe)
+    rim_value, rim_ke = calc_rim(bps, roe, beta=beta)
 
     return {
         'sales':       sales,
@@ -55,4 +93,5 @@ def calc_all(df_income_annual: pd.DataFrame, df_balance_annual: pd.DataFrame, df
         'roe':         roe,
         'debt_ratio':  debt_ratio,
         'rim_value':   rim_value,
+        'rim_ke':      rim_ke,
     }

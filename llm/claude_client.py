@@ -162,7 +162,9 @@ def _build_prompt(result: dict) -> str:
     foreign_ratio  = result.get('foreign_ratio')
 
     rim_value    = metrics.get('rim_value') if metrics else None
+    rim_ke       = metrics.get('rim_ke', 0.08) if metrics else 0.08
     rim_str      = f"{rim_value:,.0f} 원" if isinstance(rim_value, float) else "계산 불가"
+    rim_ke_pct   = f"{rim_ke * 100:.1f}%"
     mcap_str     = f"{market_cap / 1e12:.1f}조 원" if market_cap > 0 else "수집 불가"
     shares_str   = f"{shares_out:,.0f} 주" if shares_out > 0 else "수집 불가"
     price_str    = f"{current_price:,.0f} 원"
@@ -197,7 +199,7 @@ def _build_prompt(result: dict) -> str:
 현재 주가: {price_str}
 시가총액: {mcap_str}
 발행주식수: {shares_str}
-RIM 내재가치 (ke=8%): {rim_str}
+RIM 내재가치 (ke={rim_ke_pct}, CAPM): {rim_str}
 
 [연간 수익성/안정성 지표 (최근 5년)]
 {annual_summary}
@@ -257,7 +259,7 @@ RIM 내재가치 (ke=8%): {rim_str}
 (출처는 보고서 하단에 별도 첨부됨). 발췌가 없는 경우 귀하의 산업 지식만으로 작성하십시오.]
 
 ## 6. 기업가치 평가
-- **RIM 내재가치**: {rim_str} (ke=8% 적용) → [현재 주가 대비 괴리율 계산 및 해석]
+- **RIM 내재가치**: {rim_str} (ke={rim_ke_pct}, CAPM 적용) → [현재 주가 대비 괴리율 계산 및 해석]
 - **Forwarding POR**: [분기 모멘텀 반영 향후 2~3년 추정 실적 기반 산출]
 - **PER/PBR 밴드 분석**: [AI 기입]
 
